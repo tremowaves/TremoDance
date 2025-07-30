@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dancing Girl - Beat Reactive</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="container">
+        <canvas id="canvas3d"></canvas>
+        <div id="controls">
+            <input type="file" id="audioFile" accept="audio/*">
+            <button id="playBtn">Play</button>
+            <button id="pauseBtn">Pause</button>
+            <div id="audioInfo">
+                <div>BPM: <span id="bpm">--</span></div>
+                <div>Bass: <span id="bassLevel">--</span></div>
+                <div>Beat: <span id="beatStatus">--</span></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Three.js Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+    
+    <!-- Beat Detection -->
+    <script src="https://unpkg.com/web-audio-beat-detector@8.1.8/dist/web-audio-beat-detector.min.js"></script>
+    
+    <script src="main.js"></script>
+</body>
+</html> 
