@@ -53,6 +53,17 @@ class DancingGirlApp {
         this.minAnimationDuration = 3000; // 3 seconds minimum (reduced from 12)
         this.lastAnimationSwitch = 0;
         
+        // Enhanced animation state tracking
+        this.animationState = {
+            currentType: 'idle',
+            lastHeavyBassTime: 0,
+            lastHighFreqTime: 0,
+            heavyBassTimeout: 5000, // 5 seconds without heavy bass = switch to jazz
+            highFreqTimeout: 3000,  // 3 seconds without high freq = switch to medium
+            consecutiveBeats: 0,
+            lastBeatTime: 0
+        };
+        
         // Debug timer for character disappearance
         this.startTime = Date.now();
         this.lastCharacterCheck = Date.now();
@@ -690,27 +701,90 @@ class DancingGirlApp {
         const medium = mediumDance || fallback;
         const idle = idleDance || fallback;
 
-        // Enhanced logic: More responsive animation switching with better beat detection
+        // --- ENHANCED: Smart animation switching based on frequency analysis ---
         const hasAnyBeat = audioData.isBassBeat || audioData.isSnareBeat || audioData.isMidBeat;
-        const isHighEnergy = audioData.bassLevel > 0.4 || audioData.overallVolume > 0.6;
-        const isMediumEnergy = audioData.snareLevel > 0.3 || audioData.midLevel > 0.3 || audioData.overallVolume > 0.3;
         
-        if (hasAnyBeat && isHighEnergy && highEnergy) {
-            // High energy dance on any beat with high energy
-            targetAnimation = highEnergy;
-            console.log(`🔥 High energy dance triggered by ${audioData.isBassBeat ? 'BASS' : audioData.isSnareBeat ? 'SNARE' : 'MID'} beat`);
-        } else if (hasAnyBeat && isMediumEnergy && medium) {
-            // Medium dance on any beat with medium energy
+        // Frequency-based energy levels
+        const isHeavyBass = audioData.bassLevel > 0.5;
+        const isHighFrequency = audioData.midLevel > 0.4;
+        const isMediumEnergy = audioData.snareLevel > 0.3 || audioData.overallVolume > 0.4;
+        const isLowEnergy = audioData.overallVolume < 0.2;
+        
+        // Find specific dance types by keywords
+        const hiphopDance = findAnimationByKeyword(['hip', 'hop', 'rap', 'break', 'street']);
+        const jazzDance = findAnimationByKeyword(['jazz', 'smooth', 'elegant', 'graceful']);
+        const energeticDance = findAnimationByKeyword(['energetic', 'fast', 'intense', 'power']);
+        const gentleDance = findAnimationByKeyword(['gentle', 'soft', 'calm', 'peaceful']);
+        
+        // Use found animations or fallback
+        const hiphop = hiphopDance || highEnergy;
+        const jazz = jazzDance || medium;
+        const energetic = energeticDance || highEnergy;
+        const gentle = gentleDance || idle;
+        
+        // --- ENHANCED: Smart animation selection with state tracking ---
+        const now = Date.now();
+        
+        // Update state tracking
+        if (isHeavyBass) {
+            this.animationState.lastHeavyBassTime = now;
+        }
+        if (isHighFrequency) {
+            this.animationState.lastHighFreqTime = now;
+        }
+        if (hasAnyBeat) {
+            this.animationState.consecutiveBeats++;
+            this.animationState.lastBeatTime = now;
+        } else {
+            this.animationState.consecutiveBeats = 0;
+        }
+        
+        // Check timeouts for automatic transitions
+        const timeSinceHeavyBass = now - this.animationState.lastHeavyBassTime;
+        const timeSinceHighFreq = now - this.animationState.lastHighFreqTime;
+        const timeSinceLastBeat = now - this.animationState.lastBeatTime;
+        
+        // Smart animation selection based on frequency analysis and timeouts
+        if (isHeavyBass && hasAnyBeat && hiphop) {
+            // Heavy bass + beat = Hip-hop dance
+            targetAnimation = hiphop;
+            this.animationState.currentType = 'hiphop';
+            console.log(`🔥 HIP-HOP DANCE: Heavy bass (${(audioData.bassLevel * 100).toFixed(1)}%) + ${audioData.isBassBeat ? 'BASS' : 'SNARE'} beat`);
+        } else if (isHighFrequency && hasAnyBeat && energetic) {
+            // High frequency + beat = Energetic dance
+            targetAnimation = energetic;
+            this.animationState.currentType = 'energetic';
+            console.log(`⚡ ENERGETIC DANCE: High frequency (${(audioData.midLevel * 100).toFixed(1)}%) + ${audioData.isSnareBeat ? 'SNARE' : 'MID'} beat`);
+        } else if (timeSinceHeavyBass > this.animationState.heavyBassTimeout && jazz) {
+            // No heavy bass for 5 seconds = Switch to Jazz
+            targetAnimation = jazz;
+            this.animationState.currentType = 'jazz';
+            console.log(`🎷 JAZZ DANCE: No heavy bass for ${(timeSinceHeavyBass/1000).toFixed(1)}s - Auto transition`);
+        } else if (timeSinceHighFreq > this.animationState.highFreqTimeout && medium) {
+            // No high frequency for 3 seconds = Switch to Medium
             targetAnimation = medium;
-            console.log(`🎵 Medium dance triggered by ${audioData.isBassBeat ? 'BASS' : audioData.isSnareBeat ? 'SNARE' : 'MID'} beat`);
-        } else if (audioData.overallVolume > 0.2 && medium) {
-            // Medium dance on general volume
-            if (this.currentAction && this.currentAction._clip.name !== highEnergy) {
-                targetAnimation = medium;
-            }
+            this.animationState.currentType = 'medium';
+            console.log(`🎵 MEDIUM DANCE: No high frequency for ${(timeSinceHighFreq/1000).toFixed(1)}s - Auto transition`);
+        } else if (isMediumEnergy && hasAnyBeat && jazz) {
+            // Medium energy + beat = Jazz dance
+            targetAnimation = jazz;
+            this.animationState.currentType = 'jazz';
+            console.log(`🎷 JAZZ DANCE: Medium energy (${(audioData.overallVolume * 100).toFixed(1)}%) + beat`);
+        } else if (isLowEnergy && timeSinceLastBeat > 2000 && gentle) {
+            // Low energy + no beat for 2 seconds = Gentle dance
+            targetAnimation = gentle;
+            this.animationState.currentType = 'gentle';
+            console.log(`🌸 GENTLE DANCE: Low energy (${(audioData.overallVolume * 100).toFixed(1)}%) + no beat for ${(timeSinceLastBeat/1000).toFixed(1)}s`);
+        } else if (audioData.overallVolume > 0.3 && medium) {
+            // General volume = Medium dance
+            targetAnimation = medium;
+            this.animationState.currentType = 'medium';
+            console.log(`🎵 MEDIUM DANCE: General volume (${(audioData.overallVolume * 100).toFixed(1)}%)`);
         } else if (audioData.overallVolume < 0.1 && idle) {
-            // Idle when very quiet
+            // Very quiet = Idle
             targetAnimation = idle;
+            this.animationState.currentType = 'idle';
+            console.log(`😴 IDLE: Very quiet (${(audioData.overallVolume * 100).toFixed(1)}%)`);
         }
         
         // --- FIX: Only switch animation when the target changes and minimum time has passed ---
