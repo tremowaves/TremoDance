@@ -16,13 +16,50 @@ class DancingGirlApp {
         this.frequencyData = null;
         this.dataArray = null;
         
-        // --- UPGRADE: Advanced Beat Detection ---
+        // --- UPGRADE: Enhanced Beat Detection with better sensitivity ---
         this.beatState = {
-            bass: { history: new Array(60).fill(0), threshold: 1.3, lastBeat: 0, isBeat: false },
-            snare: { history: new Array(60).fill(0), threshold: 1.5, lastBeat: 0, isBeat: false },
-            beatCooldown: 150, // Minimum ms between beats for the same band
-            lastBeatTime: 0
+            bass: { 
+                history: new Array(30).fill(0), // Shorter history for faster response
+                threshold: 1.2, // Much more sensitive
+                lastBeat: 0, 
+                isBeat: false,
+                energy: 0,
+                peak: 0
+            },
+            snare: { 
+                history: new Array(30).fill(0), // Shorter history for faster response
+                threshold: 1.3, // Much more sensitive
+                lastBeat: 0, 
+                isBeat: false,
+                energy: 0,
+                peak: 0
+            },
+            mid: {
+                history: new Array(30).fill(0),
+                threshold: 1.1,
+                lastBeat: 0,
+                isBeat: false,
+                energy: 0,
+                peak: 0
+            },
+            beatCooldown: 150, // Much shorter cooldown for more responsive beats
+            lastBeatTime: 0,
+            overallEnergy: 0,
+            beatCount: 0
         };
+        
+        // Animation timing control
+        this.animationStartTime = 0;
+        this.minAnimationDuration = 3000; // 3 seconds minimum (reduced from 12)
+        this.lastAnimationSwitch = 0;
+        
+        // Debug timer for character disappearance
+        this.startTime = Date.now();
+        this.lastCharacterCheck = Date.now();
+        
+        // Enhanced error handling
+        this.errors = [];
+        this.maxErrors = 10;
         
         // Animation Control
         this.bassThreshold = 0.7;
@@ -33,14 +70,27 @@ class DancingGirlApp {
     }
     
     init() {
-        this.setupScene();
-        this.setupLighting();
-        this.setupCamera();
-        this.setupRenderer();
-        this.loadCharacter();
-        this.setupAudio();
-        this.setupControls();
-        this.animate();
+        try {
+            this.setupScene();
+            this.setupLighting();
+            this.setupCamera();
+            this.setupRenderer();
+            this.loadCharacter();
+            this.setupAudio();
+            this.setupControls();
+            this.animate();
+            console.log('✅ App initialized successfully');
+        } catch (error) {
+            this.handleError('Initialization failed', error);
+        }
+    }
+    
+    handleError(context, error) {
+        console.error(`❌ ${context}:`, error);
+        this.errors.push({ context, error, timestamp: Date.now() });
+        if (this.errors.length > this.maxErrors) {
+            this.errors.shift();
+        }
     }
     
     setupScene() {
@@ -57,7 +107,22 @@ class DancingGirlApp {
         ground.rotation.x = -Math.PI / 2;
         ground.position.y = -2;
         this.scene.add(ground);
-        console.log('🌍 Added ground plane for testing');
+        
+        // Add a debug cube that should always be visible
+        const debugGeometry = new THREE.BoxGeometry(1, 1, 1);
+        const debugMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000, wireframe: true });
+        this.debugCube = new THREE.Mesh(debugGeometry, debugMaterial);
+        this.debugCube.position.set(0, 2, 0);
+        this.scene.add(this.debugCube);
+        
+        // Add a debug sphere at character position
+        const sphereGeometry = new THREE.SphereGeometry(0.5, 8, 8);
+        const sphereMaterial = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
+        this.debugSphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
+        this.debugSphere.position.set(0, 0, 0);
+        this.scene.add(this.debugSphere);
+        
+        console.log('🌍 Added ground plane and debug cube for testing');
     }
     
     setupLighting() {
@@ -212,41 +277,77 @@ class DancingGirlApp {
             
             console.log('📋 Available animation names:', Object.keys(this.animations));
             
-            // Try to find any dance-related animation
-            const danceKeywords = ['dance', 'dancing', 'idle', 'walk', 'run', 'jump', 'move', 'animation'];
-            let foundAnimation = null;
+                         // Try to find idle animation first (priority for startup)
+             let foundAnimation = null;
+             
+                         // First priority: Look for exact "Idle" animation
+            console.log('🔍 Searching for Idle animation...');
+            console.log('🔍 Available animations:', Object.keys(this.animations));
             
-            // First, try to find exact matches from Blender
-            const exactMatches = ['Idle_Dance', 'Hip_Hop_Dancing', 'Jazz_Dance', 'Samba_Dancing'];
-            for (const exactName of exactMatches) {
-                if (this.animations[exactName]) {
-                    foundAnimation = exactName;
-                    console.log('🎵 Found exact animation match:', exactName);
-                    break;
-                }
+            if (this.animations['Idle']) {
+                foundAnimation = 'Idle';
+                console.log('🎵 Found exact Idle animation for startup');
             }
-            
-            // If no exact match, try keyword search
-            if (!foundAnimation) {
-                for (const animName of Object.keys(this.animations)) {
-                    const lowerName = animName.toLowerCase();
-                    if (danceKeywords.some(keyword => lowerName.includes(keyword))) {
-                        foundAnimation = animName;
-                        console.log('🎵 Found dance animation by keyword:', animName);
-                        break;
-                    }
-                }
-            }
-            
-            // If no dance animation found, use the first available
-            if (!foundAnimation && Object.keys(this.animations).length > 0) {
-                foundAnimation = Object.keys(this.animations)[0];
-                console.log('🔄 Using first available animation:', foundAnimation);
-            }
+             // Second priority: Look for idle-related animations
+             else {
+                 const idleKeywords = ['idle', 'stand', 'rest', 'wait'];
+                 for (const animName of Object.keys(this.animations)) {
+                     const lowerName = animName.toLowerCase();
+                     if (idleKeywords.some(keyword => lowerName.includes(keyword))) {
+                         foundAnimation = animName;
+                         console.log('🎵 Found idle animation by keyword:', animName);
+                         break;
+                     }
+                 }
+             }
+             
+             // Third priority: Look for dance animations
+             if (!foundAnimation) {
+                 const danceKeywords = ['dance', 'dancing', 'walk', 'run', 'jump', 'move'];
+                 for (const animName of Object.keys(this.animations)) {
+                     const lowerName = animName.toLowerCase();
+                     if (danceKeywords.some(keyword => lowerName.includes(keyword))) {
+                         foundAnimation = animName;
+                         console.log('🎵 Found dance animation by keyword:', animName);
+                         break;
+                     }
+                 }
+             }
+             
+             // Last resort: Use the first available animation (avoid T-Pose)
+             if (!foundAnimation && Object.keys(this.animations).length > 0) {
+                 const availableAnimations = Object.keys(this.animations);
+                 // Skip T-Pose if possible
+                 const nonTposeAnimations = availableAnimations.filter(name => 
+                     !name.toLowerCase().includes('t-pose') && 
+                     !name.toLowerCase().includes('tpose')
+                 );
+                 
+                 if (nonTposeAnimations.length > 0) {
+                     foundAnimation = nonTposeAnimations[0];
+                     console.log('🔄 Using first non-T-pose animation:', foundAnimation);
+                 } else {
+                     foundAnimation = availableAnimations[0];
+                     console.log('🔄 Using first available animation:', foundAnimation);
+                 }
+             }
             
             if (foundAnimation) {
+                console.log('🎬 Starting initial animation:', foundAnimation);
                 this.playAnimation(foundAnimation, 0.1);
                 console.log('🎬 Started animation:', foundAnimation);
+                                 console.log('⏱️ Minimum animation duration: 3 seconds');
+                
+                // Force immediate animation start
+                setTimeout(() => {
+                    if (this.currentAction && this.currentAction.isRunning()) {
+                        console.log('✅ Initial animation is running successfully');
+                    } else {
+                        console.warn('❌ Initial animation failed to start!');
+                        // Try to force start again
+                        this.playAnimation(foundAnimation, 0.1);
+                    }
+                }, 200);
             } else {
                 console.warn('⚠️ No animations found in the model!');
             }
@@ -345,7 +446,13 @@ class DancingGirlApp {
                 document.getElementById('bpm').textContent = Math.round(this.bpm);
                 console.log('BPM detected:', this.bpm);
             } else {
-                console.warn('Beat detector library not available');
+                console.warn('Beat detector library not available, using fallback detection');
+                // Fallback: Simple BPM detection based on audio duration
+                const duration = audioBuffer.duration;
+                const estimatedBPM = Math.round(60 / (duration / 8)); // Rough estimate
+                this.bpm = estimatedBPM;
+                document.getElementById('bpm').textContent = estimatedBPM;
+                console.log('Estimated BPM:', estimatedBPM);
             }
             
             console.log('Audio loaded successfully');
@@ -379,6 +486,15 @@ class DancingGirlApp {
         newAction.reset().setEffectiveWeight(1).fadeIn(fadeTime).play();
         this.currentAction = newAction;
         
+        // Force mixer update to ensure animation starts
+        if (this.mixer) {
+            this.mixer.update(0);
+        }
+        
+        // Record animation start time for minimum duration
+        this.animationStartTime = Date.now();
+        this.lastAnimationSwitch = Date.now();
+        
         // Debug: Check if animation is actually playing
         setTimeout(() => {
             if (newAction.isRunning()) {
@@ -390,71 +506,155 @@ class DancingGirlApp {
         }, 100);
     }
     
-    // --- UPGRADE: Switched to more accurate, peak-based beat detection ---
+    // --- UPGRADE: Enhanced beat detection with multiple frequency bands and adaptive thresholds ---
     analyzeAudio() {
         if (!this.analyser || !this.audioElement || this.audioElement.paused) {
             // Reset beat state when paused
-            if (this.beatState.bass) this.beatState.bass.isBeat = false;
-            if (this.beatState.snare) this.beatState.snare.isBeat = false;
+            Object.keys(this.beatState).forEach(key => {
+                if (this.beatState[key] && typeof this.beatState[key] === 'object' && this.beatState[key].isBeat !== undefined) {
+                    this.beatState[key].isBeat = false;
+                }
+            });
             return { overallVolume: 0 };
         }
 
         this.analyser.getByteFrequencyData(this.frequencyData);
         const bufferLength = this.analyser.frequencyBinCount;
 
-        // --- FIX: Corrected frequency ranges ---
+        // Enhanced frequency analysis with more bands
         const nyquist = this.audioContext.sampleRate / 2;
         const getEnergy = (startFreq, endFreq) => {
             const startIdx = Math.floor((startFreq / nyquist) * bufferLength);
             const endIdx = Math.ceil((endFreq / nyquist) * bufferLength);
             let sum = 0;
-            for (let i = startIdx; i <= endIdx; i++) {
+            let count = 0;
+            for (let i = startIdx; i <= endIdx && i < bufferLength; i++) {
                 sum += this.frequencyData[i];
+                count++;
             }
-            return sum / (endIdx - startIdx + 1) / 255; // Normalize to 0-1
+            return count > 0 ? sum / count / 255 : 0; // Normalize to 0-1
         };
 
-        const bassLevel = getEnergy(20, 250);   // Bass range
-        const snareLevel = getEnergy(1000, 4000); // Snare/mid-high range
+        // Multiple frequency bands for better beat detection
+        const subBass = getEnergy(20, 60);      // Sub-bass (kick drums)
+        const bass = getEnergy(60, 250);        // Bass (bass guitar, kick)
+        const lowMid = getEnergy(250, 500);     // Low-mid (snare body)
+        const mid = getEnergy(500, 2000);       // Mid (snare, vocals)
+        const highMid = getEnergy(2000, 4000);  // High-mid (hi-hats, cymbals)
+        const high = getEnergy(4000, 8000);     // High (cymbals, effects)
+        
+        const bassLevel = (subBass + bass) / 2; // Combined bass
+        const snareLevel = (lowMid + mid) / 2;  // Combined snare
+        const midLevel = (mid + highMid) / 2;   // Combined mid
         const overallVolume = getEnergy(20, 16000);
 
-        // Detect beat by comparing current energy to historical average
-        const detectPeak = (band, level) => {
+        // Enhanced beat detection with adaptive thresholds
+        const detectBeat = (band, level) => {
             const state = this.beatState[band];
-            const avg = state.history.reduce((a, b) => a + b, 0) / state.history.length;
+            if (!state) return;
             
-            state.isBeat = false;
-            if (level > avg * state.threshold && Date.now() - this.beatState.lastBeatTime > this.beatState.beatCooldown) {
-                state.isBeat = true;
-                this.beatState.lastBeatTime = Date.now();
+            // Update energy tracking
+            state.energy = level;
+            state.peak = Math.max(state.peak, level);
+            
+            // Calculate dynamic average (more recent samples have more weight)
+            let weightedSum = 0;
+            let weight = 1;
+            let totalWeight = 0;
+            
+            for (let i = state.history.length - 1; i >= 0; i--) {
+                weightedSum += state.history[i] * weight;
+                totalWeight += weight;
+                weight *= 0.9; // Decay factor
             }
             
+            const dynamicAvg = totalWeight > 0 ? weightedSum / totalWeight : 0;
+            
+            // Adaptive threshold based on overall energy
+            const adaptiveThreshold = state.threshold * (1 + this.beatState.overallEnergy * 0.5);
+            
+            // Beat detection logic
+            const isPeak = level > dynamicAvg * adaptiveThreshold;
+            const isStrongEnough = level > 0.1; // Minimum energy threshold
+            const timeSinceLastBeat = Date.now() - this.beatState.lastBeatTime;
+            const cooldownPassed = timeSinceLastBeat > this.beatState.beatCooldown;
+            
+            state.isBeat = false;
+            if (isPeak && isStrongEnough && cooldownPassed) {
+                state.isBeat = true;
+                this.beatState.lastBeatTime = Date.now();
+                this.beatState.beatCount++;
+                
+                // Dynamic cooldown adjustment based on beat frequency
+                if (this.beatState.beatCount > 10) {
+                    const avgBeatInterval = timeSinceLastBeat / this.beatState.beatCount;
+                    this.beatState.beatCooldown = Math.max(50, Math.min(300, avgBeatInterval * 0.8));
+                }
+            }
+            
+            // Update history
             state.history.shift();
             state.history.push(level);
+            
+            // Decay peak over time
+            state.peak *= 0.95;
         };
 
-        detectPeak('bass', bassLevel);
-        detectPeak('snare', snareLevel);
+        // Update overall energy
+        this.beatState.overallEnergy = overallVolume;
+        
+        // Detect beats in all bands
+        detectBeat('bass', bassLevel);
+        detectBeat('snare', snareLevel);
+        detectBeat('mid', midLevel);
 
-        // Update UI
+        // Enhanced UI updates
         document.getElementById('bassLevel').textContent = (bassLevel * 100).toFixed(1) + '%';
+        
         let beatStatus = '...';
-        if(this.beatState.bass.isBeat) beatStatus = 'BASS';
-        if(this.beatState.snare.isBeat) beatStatus = 'SNARE';
+        if (this.beatState.bass.isBeat) beatStatus = 'BASS';
+        if (this.beatState.snare.isBeat) beatStatus = 'SNARE';
+        if (this.beatState.mid.isBeat) beatStatus = 'MID';
         document.getElementById('beatStatus').textContent = beatStatus;
+        
+        // Enhanced debug logging
+        if (Math.random() < 0.02) { // 2% chance per frame for more frequent logging
+            console.log('🎵 Enhanced Beat Debug:');
+            console.log('  Bass:', (bassLevel * 100).toFixed(1) + '%', this.beatState.bass.isBeat ? '🔥' : '');
+            console.log('  Snare:', (snareLevel * 100).toFixed(1) + '%', this.beatState.snare.isBeat ? '🔥' : '');
+            console.log('  Mid:', (midLevel * 100).toFixed(1) + '%', this.beatState.mid.isBeat ? '🔥' : '');
+            console.log('  Overall:', (overallVolume * 100).toFixed(1) + '%');
+            console.log('  Beat Count:', this.beatState.beatCount);
+            console.log('  Cooldown:', this.beatState.beatCooldown + 'ms');
+        }
 
         return {
             overallVolume,
             bassLevel,
             snareLevel,
+            midLevel,
             isBassBeat: this.beatState.bass.isBeat,
-            isSnareBeat: this.beatState.snare.isBeat
+            isSnareBeat: this.beatState.snare.isBeat,
+            isMidBeat: this.beatState.mid.isBeat,
+            beatCount: this.beatState.beatCount
         };
     }
     
     // --- UPGRADE: Smarter animation logic based on detected beats ---
     updateDanceMovements(audioData) {
         if (!this.character) return;
+        
+        const currentTime = Date.now();
+        const timeSinceLastSwitch = currentTime - this.lastAnimationSwitch;
+        
+        // Check if minimum animation duration has passed
+        if (timeSinceLastSwitch < this.minAnimationDuration) {
+            // Still in minimum duration period, don't switch animations
+            if (Math.random() < 0.01) { // Log occasionally
+                console.log(`⏱️ Animation locked for ${(this.minAnimationDuration - timeSinceLastSwitch)/1000}s more`);
+            }
+            return;
+        }
         
         let targetAnimation = this.currentAction ? this.currentAction._clip.name : null;
         
@@ -490,29 +690,50 @@ class DancingGirlApp {
         const medium = mediumDance || fallback;
         const idle = idleDance || fallback;
 
-        // Logic: Beats have the highest priority. If no beat, decide based on volume.
-        if (audioData.isBassBeat && highEnergy) {
+        // Enhanced logic: More responsive animation switching with better beat detection
+        const hasAnyBeat = audioData.isBassBeat || audioData.isSnareBeat || audioData.isMidBeat;
+        const isHighEnergy = audioData.bassLevel > 0.4 || audioData.overallVolume > 0.6;
+        const isMediumEnergy = audioData.snareLevel > 0.3 || audioData.midLevel > 0.3 || audioData.overallVolume > 0.3;
+        
+        if (hasAnyBeat && isHighEnergy && highEnergy) {
+            // High energy dance on any beat with high energy
             targetAnimation = highEnergy;
-        } else if (audioData.isSnareBeat && medium) {
+            console.log(`🔥 High energy dance triggered by ${audioData.isBassBeat ? 'BASS' : audioData.isSnareBeat ? 'SNARE' : 'MID'} beat`);
+        } else if (hasAnyBeat && isMediumEnergy && medium) {
+            // Medium dance on any beat with medium energy
             targetAnimation = medium;
-        } else if (audioData.overallVolume > 0.25) {
-            // Avoid switching back and forth rapidly if already in a beat-driven dance
+            console.log(`🎵 Medium dance triggered by ${audioData.isBassBeat ? 'BASS' : audioData.isSnareBeat ? 'SNARE' : 'MID'} beat`);
+        } else if (audioData.overallVolume > 0.2 && medium) {
+            // Medium dance on general volume
             if (this.currentAction && this.currentAction._clip.name !== highEnergy) {
-                 targetAnimation = medium;
+                targetAnimation = medium;
             }
-        } else if (audioData.overallVolume < 0.1) {
+        } else if (audioData.overallVolume < 0.1 && idle) {
+            // Idle when very quiet
             targetAnimation = idle;
         }
         
-        // --- FIX: Only switch animation when the target changes ---
+        // --- FIX: Only switch animation when the target changes and minimum time has passed ---
         if (targetAnimation && (!this.currentAction || targetAnimation !== this.currentAction._clip.name)) {
-             console.log('Switching to animation:', targetAnimation);
+             console.log(`🎵 Switching to animation: "${targetAnimation}" (after ${(timeSinceLastSwitch/1000).toFixed(1)}s)`);
+             console.log(`⏱️ Minimum duration enforced: 3 seconds`);
+             console.log(`🎯 Current animation: ${this.currentAction ? this.currentAction._clip.name : 'none'}`);
+             console.log(`🎯 Target animation: ${targetAnimation}`);
              this.playAnimation(targetAnimation);
         }
 
-        // Other reactive effects
-        const scale = 1.2 + (audioData.bassLevel * 0.1);
-        this.character.scale.lerp(new THREE.Vector3(scale, scale, scale), 0.2);
+        // Other reactive effects - DISABLED SCALE CHANGES FOR DEBUG
+        // const scale = 1.2 + (audioData.bassLevel * 0.1);
+        // this.character.scale.lerp(new THREE.Vector3(scale, scale, scale), 0.2);
+        
+        // Force character scale to stay at 3,3,3
+        this.character.scale.set(3, 3, 3);
+        
+        // Debug: Check if character is still in scene
+        if (!this.scene.children.includes(this.character)) {
+            console.error('❌ Character was removed from scene! Re-adding...');
+            this.scene.add(this.character);
+        }
 
         const time = Date.now() * 0.001;
         this.pointLights.forEach((light, i) => {
@@ -544,25 +765,113 @@ class DancingGirlApp {
                     })));
                 }
             }
+            
+            // Debug: Check if current action is running
+            if (this.currentAction && !this.currentAction.isRunning()) {
+                console.warn('⚠️ Current action is not running!');
+                console.warn('Action:', this.currentAction._clip.name);
+                console.warn('Is running:', this.currentAction.isRunning());
+                console.warn('Weight:', this.currentAction.getEffectiveWeight());
+            }
+        }
+        
+        // ENHANCED: Better character visibility and scene inclusion checks
+        if (this.character) {
+            const currentTime = Date.now();
+            const timeSinceStart = (currentTime - this.startTime) / 1000;
+            
+            // Check every 60 frames (about twice per second at 30fps)
+            if (Math.random() < 0.06) {
+                console.log(`🔍 Character check at ${timeSinceStart.toFixed(1)}s - Visible:`, this.character.visible, 'In scene:', this.scene.children.includes(this.character));
+                console.log(`📏 Character scale:`, this.character.scale.x.toFixed(3), this.character.scale.y.toFixed(3), this.character.scale.z.toFixed(3));
+                console.log(`📍 Character position:`, this.character.position.x.toFixed(3), this.character.position.y.toFixed(3), this.character.position.z.toFixed(3));
+                
+                // Force character to stay visible and in scene
+                if (!this.character.visible) {
+                    console.error(`❌ CHARACTER BECAME INVISIBLE at ${timeSinceStart.toFixed(1)}s! Making visible...`);
+                    this.character.visible = true;
+                    // Also check all child meshes
+                    this.character.traverse(child => {
+                        if (child.isMesh) {
+                            child.visible = true;
+                        }
+                    });
+                }
+                
+                if (!this.scene.children.includes(this.character)) {
+                    console.error(`❌ CHARACTER REMOVED FROM SCENE at ${timeSinceStart.toFixed(1)}s! Re-adding...`);
+                    this.scene.add(this.character);
+                }
+                
+                // Additional safety: ensure character position is valid
+                if (isNaN(this.character.position.x) || isNaN(this.character.position.y) || isNaN(this.character.position.z)) {
+                    console.error(`❌ CHARACTER POSITION IS INVALID at ${timeSinceStart.toFixed(1)}s! Resetting...`);
+                    this.character.position.set(0, 0, 0);
+                }
+                
+                // Check if character scale is too small (invisible)
+                if (this.character.scale.x < 0.1 || this.character.scale.y < 0.1 || this.character.scale.z < 0.1) {
+                    console.error(`❌ CHARACTER SCALE TOO SMALL at ${timeSinceStart.toFixed(1)}s! Resetting scale...`);
+                    this.character.scale.set(3, 3, 3);
+                }
+                
+                // Check if character is too far from camera
+                const distanceFromCamera = this.character.position.distanceTo(this.camera.position);
+                if (distanceFromCamera > 50) {
+                    console.error(`❌ CHARACTER TOO FAR FROM CAMERA at ${timeSinceStart.toFixed(1)}s! Distance: ${distanceFromCamera.toFixed(1)}`);
+                    this.character.position.set(0, 0, 0);
+                }
+                
+                // Check character materials
+                this.character.traverse(child => {
+                    if (child.isMesh && child.material) {
+                        if (child.material.opacity !== undefined && child.material.opacity < 0.1) {
+                            console.error(`❌ CHARACTER MATERIAL TOO TRANSPARENT at ${timeSinceStart.toFixed(1)}s! Opacity: ${child.material.opacity}`);
+                            child.material.opacity = 1.0;
+                            child.material.transparent = false;
+                        }
+                        if (child.material.visible === false) {
+                            console.error(`❌ CHARACTER MATERIAL INVISIBLE at ${timeSinceStart.toFixed(1)}s!`);
+                            child.material.visible = true;
+                        }
+                    }
+                });
+            }
         }
         
         const audioData = this.analyzeAudio();
         this.updateDanceMovements(audioData);
 
-        // Dynamic camera
+        // Enhanced camera movement
         if (this.audioElement && !this.audioElement.paused) {
             const time = this.clock.elapsedTime;
-            this.camera.position.x = Math.sin(time * 0.2) * 1.5;
-            this.camera.position.z = 6 + Math.cos(time * 0.2) * 1.5;
+            const audioInfluence = audioData.overallVolume * 0.3;
+            this.camera.position.x = Math.sin(time * 0.2) * (1.5 + audioInfluence);
+            this.camera.position.z = 6 + Math.cos(time * 0.2) * (1.5 + audioInfluence);
             this.camera.lookAt(0, 1, 0);
         }
 
         // Debug: Log render info occasionally
         if (Math.random() < 0.005) { // 0.5% chance per frame
             console.log('🎬 Rendering frame - Scene children:', this.scene.children.length);
+            if (this.character) {
+                console.log('🎯 Character visible:', this.character.visible);
+                console.log('🎯 Character position:', this.character.position);
+                console.log('🎯 Character in scene:', this.scene.children.includes(this.character));
+            }
         }
         
-        this.renderer.render(this.scene, this.camera);
+        // ENHANCED: Better error handling for rendering
+        try {
+            this.renderer.render(this.scene, this.camera);
+        } catch (error) {
+            console.error('❌ Render error:', error);
+            // Try to recover by re-adding character
+            if (this.character && !this.scene.children.includes(this.character)) {
+                console.log('🔄 Recovering from render error - re-adding character');
+                this.scene.add(this.character);
+            }
+        }
     }
 }
 
